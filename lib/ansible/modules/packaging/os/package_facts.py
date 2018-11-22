@@ -21,7 +21,7 @@ options:
     description:
       - The package manager used by the system so we can query the package information
     default: auto
-    choices: ["auto", "rpm", "apt"]
+    choices: ["auto", "rpm", "apt", "opkg"]
     required: False
 version_added: "2.5"
 author:
@@ -188,6 +188,36 @@ def apt_package_list():
             installed_packages[package_details['name']].append(package_details)
     return installed_packages
 
+def opkg_package_list(module):
+    opkg_path = module.get_bin_path('opkg', True, ['/bin'])
+    installed_packages = {}
+
+    rc, out, err = module.run_command("%s list-installed" % (pipes.quote(opkg_path)), use_unsafe_shell=False)
+    if rc == 0:
+        for pkg_line in out.splitlines():
+            pkg = pkg_line.split(' - ', 1)[0]
+            info_rc, info_out, info_err = module.run_command("%s info %s" % (pipes.quote(opkg_path), pipes.quote(pkg)), use_unsafe_shell=False)
+            if info_rc == 0:
+                info = dict([map(str.strip, line.split(':', 1)) for line in info_out.splitlines() if ':' in line])
+                if ':' in info['Version']:
+                    epoch = info['Version'].split(':', 1)[0]
+                    version = info['Version'].split(':', 1)[1].rsplit('-r', 1)[0]
+                else:
+                    epoch = None
+                    version = info['Version'].rsplit('-r', 1)[0]
+                release = 'r%s' % info['Version'].rsplit('-r', 1)[1]
+                package_details = dict(name=info['Package'],
+                                       version=version,
+                                       release=release,
+                                       epoch=epoch,
+                                       arch=info['Architecture'],
+                                       source='opkg')
+                if package_details['name'] not in installed_packages:
+                    installed_packages[package_details['name']] = [package_details]
+                else:
+                    installed_packages[package_details['name']].append(package_details)
+    return installed_packages
+
 
 # FIXME: add more listing methods
 def main():
@@ -214,6 +244,8 @@ def main():
             packages = rpm_package_list()
         elif manager == "apt":
             packages = apt_package_list()
+        elif manager == "opkg":
+            packages = opkg_package_list(module)
         else:
             if manager:
                 results['msg'] = 'Unsupported package manager: %s' % manager
